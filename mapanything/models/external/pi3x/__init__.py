@@ -39,11 +39,14 @@ class Pi3XWrapper(torch.nn.Module):
 
         # Get the dtype for Pi3X inference
         # bfloat16 is supported on Ampere GPUs (Compute Capability 8.0+)
-        self.dtype = (
-            torch.bfloat16
-            if torch.cuda.get_device_capability()[0] >= 8
-            else torch.float16
-        )
+        if torch.cuda.is_available():
+            self.dtype = (
+                torch.bfloat16
+                if torch.cuda.get_device_capability()[0] >= 8
+                else torch.float16
+            )
+        else:
+            self.dtype = torch.float32
 
     def forward(self, views):
         """
@@ -106,14 +109,15 @@ class Pi3XWrapper(torch.nn.Module):
                 conditions["poses"] = poses
 
         # Run the Pi3X aggregator
-        with torch.autocast("cuda", dtype=self.dtype):
+        use_autocast = device.type == "cuda"
+        with torch.autocast(device_type=device.type, enabled=use_autocast, dtype=self.dtype):
             results = self.model(
                 imgs=images,
                 **conditions,
             )
 
         # Need high precision for transformations
-        with torch.autocast("cuda", enabled=False):
+        with torch.autocast(device_type=device.type, enabled=False):
             # Convert the output to MapAnything format
             res = []
             for view_idx in range(num_views):

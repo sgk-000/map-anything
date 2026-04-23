@@ -50,11 +50,14 @@ class DA3Wrapper(torch.nn.Module):
 
         # Get the dtype for DA3 inference
         # bfloat16 is supported on Ampere GPUs (Compute Capability 8.0+)
-        self.dtype = (
-            torch.bfloat16
-            if torch.cuda.get_device_capability()[0] >= 8
-            else torch.float16
-        )
+        if torch.cuda.is_available():
+            self.dtype = (
+                torch.bfloat16
+                if torch.cuda.get_device_capability()[0] >= 8
+                else torch.float16
+            )
+        else:
+            self.dtype = torch.float32
 
     def forward(self, views):
         """
@@ -119,7 +122,8 @@ class DA3Wrapper(torch.nn.Module):
                 conditions["extrinsics"] = poses
 
         # Run the DA3 model
-        with torch.autocast("cuda", dtype=self.dtype):
+        use_autocast = device.type == "cuda"
+        with torch.autocast(device_type=device.type, enabled=use_autocast, dtype=self.dtype):
             results = self.model(
                 image=images,
                 export_feat_layers=[],
@@ -128,7 +132,7 @@ class DA3Wrapper(torch.nn.Module):
             )
 
         # Need high precision for transformations
-        with torch.autocast("cuda", enabled=False):
+        with torch.autocast(device_type=device.type, enabled=False):
             res = []
             for view_idx in range(num_views):
                 # Get the extrinsics, intrinsics, depth map for the current view
