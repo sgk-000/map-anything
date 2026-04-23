@@ -6,9 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "mapanything"
 version = "1.1"
 description = "Universal Feed-Forward Metric 3D Reconstruction"
-readme = "readme.md"
+readme = "README.md"
 authors = [{ name = "Nikhil Keetha", email = "keethanikhil@gmail.com" }]
-requires-python = ">=3.10.0"
+requires-python = ">=3.11.0,<3.13"
 dependencies = [
     "huggingface_hub",
     "hydra-core",
