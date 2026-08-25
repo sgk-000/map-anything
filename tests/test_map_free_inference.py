@@ -120,6 +120,37 @@ class StubMapAnythingModel:
         return predictions
 
 
+class StubWrapperModel:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, views):
+        self.calls.append(
+            {
+                "devices": [view["img"].device.type for view in views],
+                "instances": [view["instance"] for view in views],
+                "norm_types": [view["data_norm_type"] for view in views],
+            }
+        )
+        outputs = []
+        for view in views:
+            device = view["img"].device
+            translation = torch.tensor(
+                [[float(view["idx"]), 0.0, 0.0]],
+                device=device,
+            )
+            outputs.append(
+                {
+                    "cam_trans": translation,
+                    "cam_quats": torch.tensor(
+                        [[0.0, 0.0, 0.0, 1.0]],
+                        device=device,
+                    ),
+                }
+            )
+        return outputs
+
+
 class MapFreeInferenceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -379,6 +410,104 @@ class MapFreeInferenceTests(unittest.TestCase):
         self.assertEqual(loaded["drive"].item(), "s00000")
         self.assertEqual(loaded["camera"].item(), "all")
         self.assertEqual(loaded["poses"].shape, (2, 4, 4))
+
+    def test_pi3x_preprocessing_and_adapter_produce_camera_poses(self) -> None:
+        image_paths = mf.load_scene_image_paths(self.scene0)[:2]
+        intrinsics = mf.parse_map_free_intrinsics(self.scene0)
+        raw_views = mf.build_raw_views_for_batch(
+            image_paths,
+            scene_dir=self.scene0,
+            intrinsics_by_frame=intrinsics,
+        )
+        config = mf.MapFreeInferenceConfig(model="pi3x", device="cpu", use_amp=False)
+        processed_views = mf.preprocess_batch_views(
+            raw_views,
+            mf.MODEL_SPECS["pi3x"],
+            config,
+        )
+
+        self.assertEqual(tuple(processed_views[0]["img"].shape[-2:]), (252, 518))
+        self.assertEqual(processed_views[0]["data_norm_type"], ["identity"])
+
+        stub_model = StubWrapperModel()
+        predictions = mf.run_model_inference(
+            "pi3x",
+            stub_model,
+            processed_views,
+            torch.device("cpu"),
+            config,
+        )
+        serialized = mf.normalize_predictions_for_saving(predictions)
+
+        self.assertEqual(serialized["camera_poses"].shape, (2, 4, 4))
+        np.testing.assert_allclose(
+            serialized["camera_poses"][:, :3, 3],
+            np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float32),
+        )
+        self.assertEqual(stub_model.calls[0]["devices"], ["cpu", "cpu"])
+        self.assertEqual(
+            stub_model.calls[0]["norm_types"],
+            [["identity"], ["identity"]],
+        )
+
+    def test_cli_pi3x_smoke_writes_compatible_output_and_manifest(self) -> None:
+        stub_model = StubWrapperModel()
+        captured_configs: list[mf.MapFreeInferenceConfig] = []
+
+        def loader(config, device):
+            captured_configs.append(config)
+            return stub_model
+
+        stub_spec = replace(mf.MODEL_SPECS["pi3x"], loader=loader)
+        cli = _load_cli_module()
+        parsed_args = cli.parse_args(["--model", "pi3x", "--machine", "test_machine"])
+        self.assertEqual(parsed_args.model, "pi3x")
+        self.assertEqual(parsed_args.machine, "test_machine")
+
+        output_root = self.tmp_path / "pi3x_outputs"
+        with patch.dict(mf.MODEL_SPECS, {"pi3x": stub_spec}, clear=False):
+            cli.main(
+                [
+                    "--model",
+                    "pi3x",
+                    "--dataset-root",
+                    str(self.dataset_root),
+                    "--scenes",
+                    "s00000",
+                    "--machine",
+                    "test_machine",
+                    "--device",
+                    "cpu",
+                    "--no-amp",
+                    "--output-root",
+                    str(output_root),
+                ]
+            )
+
+        scene_output_dir = (
+            output_root / "pi3x" / "window_all_res_518" / "train" / "s00000"
+        )
+        manifest = json.loads(
+            (scene_output_dir / "run_manifest.json").read_text(encoding="utf-8")
+        )
+        batch = np.load(scene_output_dir / "0.npz")
+
+        self.assertEqual(captured_configs[0].machine, "test_machine")
+        self.assertEqual(manifest["model"], "pi3x")
+        self.assertEqual(manifest["config"]["machine"], "test_machine")
+        self.assertEqual(manifest["model_spec"]["norm_type"], "identity")
+        self.assertEqual(batch["model"].item(), "pi3x")
+        self.assertEqual(batch["poses"].shape, (4, 4, 4))
+        self.assertEqual(
+            batch["frame_ids"].tolist(),
+            [
+                "seq0/frame_00000.jpg",
+                "seq0/frame_00002.jpg",
+                "seq1/frame_00000.jpg",
+                "seq1/frame_00003.jpg",
+            ],
+        )
+        self.assertEqual(stub_model.calls[0]["devices"], ["cpu"] * 4)
 
     def test_cli_smoke_writes_full_scene_output_and_manifest(self) -> None:
         stub_model = StubMapAnythingModel()

@@ -48,3 +48,69 @@ Requirements:
 5. Please identify any model-specific differences that need to be handled separately.
 
 The goal is to design a maintainable inference script framework for KITTI Raw that can run any of the three models through a unified interface.
+
+
+## Inference script for map-free dataset
+Please create an implementation plan for running MapAnything inference on the Map-Free dataset.
+
+The goal is to design a script or pipeline that predicts camera poses for train scenes in the Map-Free dataset using MapAnything.
+
+Please refer to the existing KITTI Raw MapAnything inference script for guidance on how MapAnything should be loaded and executed:
+
+- /home/kobayashi/map-anything/scripts/kitti_raw_inference.py
+
+MapAnything input should be all frames of same snene on train split.
+
+For dataset structure, image loading, scene traversal, and Map-Free-specific handling, please refer to the following reference implementations:
+
+- https://github.com/nianticlabs/map-free-reloc
+- https://github.com/nianticlabs/mickey
+
+Dataset location:
+
+- /home/kobayashi/dataset/map_free
+
+Requirements:
+
+1. Inspect the existing MapAnything KITTI Raw inference implementation and summarize the reusable components.
+2. Investigate the Map-Free dataset structure and identify how images, scenes, sequences, intrinsics, and metadata should be loaded.
+3. Propose a clean implementation plan for adapting RoMa inference to the train scenes in Map-Free dataset.
+4. Specify the expected input and output directory structure.
+5. Output format should be same with kitti_raw_inference.py
+6. Ensure that the plan is consistent with the conventions used in the existing research-posenet codebase.
+
+Please carefully check the referenced scripts and repositories before proposing the plan.
+
+
+## Inference script for map-free dataset with image list
+Please create an implementation plan for running MapAnything inference on the Map-Free dataset.
+
+The goal is to design a script or pipeline that predicts camera poses for train scenes in the Map-Free dataset using MapAnything.
+
+Please refer to the existing MapFree MapAnything inference script for guidance on how MapAnything should be loaded and executed:
+
+- /home/kobayashi/map-anything/scripts/map_free_inference.py
+
+MapAnything input should be all frames (seq0+seq1) of same scene on below image list.
+
+- /home/kobayashi/research-posenet/mapfree_train_all_scenes_interval10_image_paths.csv
+
+For dataset structure, image loading, scene traversal, and Map-Free-specific handling, please refer to the following reference implementations:
+
+- https://github.com/nianticlabs/map-free-reloc
+- https://github.com/nianticlabs/mickey
+
+Dataset location:
+
+- /home/kobayashi/dataset/map_free
+
+Requirements:
+
+1. Inspect the existing MapAnything Map-Free inference implementation and summarize the reusable components.
+2. Investigate the Map-Free dataset structure and identify how images, scenes, sequences, intrinsics, and metadata should be loaded.
+3. Propose a clean implementation plan for adapting MapAnything inference to the train scenes in Map-Free dataset.
+4. Specify the expected input and output directory structure.
+5. Output format should be same with map_free_inference.py
+6. Ensure that the plan is consistent with the conventions used in the existing research-posenet codebase.
+
+Please carefully check the referenced scripts and repositories before proposing the plan.

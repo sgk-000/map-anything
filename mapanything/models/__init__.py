@@ -184,6 +184,8 @@ MODEL_CONFIGS = {
     "pi3x": {
         "module": "mapanything.models.external.pi3x",
         "class_name": "Pi3XWrapper",
+        "required_module": "pi3",
+        "install_extra": "pi3",
     },
     "pow3r": {
         "module": "mapanything.models.external.pow3r",
@@ -246,6 +248,18 @@ def model_factory(model_str: str, **kwargs):
     elif "module" in model_config:
         module_path = model_config["module"]
         class_name = model_config["class_name"]
+        required_module = model_config.get("required_module")
+        install_extra = model_config.get("install_extra")
+
+        # Check optional third-party dependencies before importing the local wrapper.
+        if required_module and not check_module_exists(required_module):
+            raise ImportError(
+                f"Model '{model_str}' requires optional dependency module "
+                f"'{required_module}'. Install it with `uv sync --extra "
+                f"{install_extra}` or run Map-Free inference with `uv run --extra "
+                f"{install_extra} python scripts/map_free_inference.py --model "
+                f"{model_str} ...`."
+            )
 
         # Check if the module can be imported
         if not check_module_exists(module_path):

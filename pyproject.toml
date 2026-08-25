@@ -19,7 +19,7 @@ dependencies = [
     "plyfile",
     "python-box",
     "requests",
-    "rerun-sdk~=0.24.1",
+    "rerun-sdk",
     "safetensors",
     "tensorboard",
     "tqdm",
@@ -33,12 +33,14 @@ dev = ["pre-commit", "pytest", "pytest-cov", "ruff"]
 colmap = [
     "lightglue @ git+https://github.com/cvg/LightGlue.git",
     "open3d",
-    "pycolmap==3.10.0"
+    "pycolmap==3.10.0",
 ]
 gradio = ["gradio==5.47.2", "spaces"]
 radio = ["timm"]
 # External models for benchmarking
-anycalib = ["anycalib @ git+https://github.com/javrtg/AnyCalib.git@main#egg=anycalib"]
+anycalib = [
+    "anycalib @ git+https://github.com/javrtg/AnyCalib.git@main#egg=anycalib",
+]
 dust3r = [
     "croco @ git+https://github.com/naver/croco.git@croco_module#egg=croco",
     "dust3r @ git+https://github.com/naver/dust3r.git@dust3r_setup#egg=dust3r",
@@ -47,9 +49,15 @@ mast3r = ["mast3r @ git+https://github.com/Nik-V9/mast3r.git@main#egg=mast3r"]
 must3r = ["must3r @ git+https://github.com/naver/must3r.git@main#egg=must3r"]
 pi3 = ["pi3 @ git+https://github.com/yyfz/Pi3.git@main#egg=pi3"]
 pow3r = ["pow3r @ git+https://github.com/Nik-V9/pow3r.git@main#egg=pow3r"]
-vggt-omega = ["vggt-omega @ git+https://github.com/facebookresearch/vggt-omega.git@main#egg=vggt-omega"]
-depth-anything-3 = ["depth-anything-3 @ git+https://github.com/Nik-V9/depth-anything-3.git@main#egg=depth-anything-3"]
-rmvd = ["rmvd @ git+https://github.com/infinity1096/robustmvd.git@master#egg=rmvd"]
+vggt-omega = [
+    "vggt-omega @ git+https://github.com/facebookresearch/vggt-omega.git@main#egg=vggt-omega",
+]
+depth-anything-3 = [
+    "depth-anything-3 @ git+https://github.com/Nik-V9/depth-anything-3.git@main#egg=depth-anything-3",
+]
+rmvd = [
+    "rmvd @ git+https://github.com/infinity1096/robustmvd.git@master#egg=rmvd",
+]
 
 # Install all optional dependencies
 all = [

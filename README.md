@@ -435,6 +435,13 @@ pip install -e ".[depth-anything-3]" # Depth Anything 3
 pip install -e ".[all]"
 ```
 
+With `uv`, select the `pi3` extra when syncing the environment or invoking Pi3X:
+
+```bash
+uv sync --extra pi3
+uv run --extra pi3 python scripts/map_free_inference.py --model pi3x ...
+```
+
 #### Quick Start Example {#external-model-quick-start}
 
 **Example 1: Using `init_model_from_config` (recommended)**

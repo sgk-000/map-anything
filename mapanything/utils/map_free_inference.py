@@ -13,17 +13,23 @@ import torch
 from PIL import Image
 from tqdm import tqdm
 
-from mapanything.models import MapAnything
-from mapanything.utils.device import get_device
+from mapanything.models import init_model_from_config, MapAnything
+from mapanything.utils.device import (
+    get_amp_dtype,
+    get_autocast_device_type,
+    get_device,
+    to_device,
+)
 from mapanything.utils.image import preprocess_inputs
+from mapanything.utils.inference import postprocess_model_outputs_for_inference
 
-DEFAULT_DATASET_ROOT = Path("/home/kobayashi/dataset/map_free")
+DEFAULT_DATASET_ROOT = Path("/mnt/ssd2/map_free")
 DEFAULT_OUTPUT_ROOT = DEFAULT_DATASET_ROOT / "mapanything_inference_outputs"
 DEFAULT_MAPANYTHING_MODEL_ID = "facebook/map-anything"
 DEFAULT_SPLIT = "train"
 DEFAULT_WINDOW_SIZE = 0
 MAP_FREE_CAMERA_NAME = "all"
-SUPPORTED_MODELS = ("mapanything",)
+SUPPORTED_MODELS = ("mapanything", "pi3x")
 SUPPORTED_SPLITS = ("train", "val", "test")
 SUPPORTED_SEQUENCES = ("seq0", "seq1")
 IMAGE_LIST_REQUIRED_COLUMNS = frozenset(
@@ -41,6 +47,7 @@ class MapFreeInferenceConfig:
     window_size: int = DEFAULT_WINDOW_SIZE
     long_side_resolution: int | None = None
     device: str = "auto"
+    machine: str = "default"
     mapanything_model_id: str = DEFAULT_MAPANYTHING_MODEL_ID
     output_root: Path = DEFAULT_OUTPUT_ROOT
     overwrite: bool = False
@@ -110,6 +117,16 @@ def load_mapanything_model(
     return model
 
 
+def load_hydra_model(
+    model_name: str,
+    config: MapFreeInferenceConfig,
+    device: torch.device,
+) -> torch.nn.Module:
+    model = init_model_from_config(model_name, device=device, machine=config.machine)
+    model.eval()
+    return model
+
+
 def mapanything_adapter(
     model: torch.nn.Module,
     views: list[dict[str, Any]],
@@ -130,6 +147,33 @@ def mapanything_adapter(
         )
 
 
+def wrapper_adapter(
+    model: torch.nn.Module,
+    views: list[dict[str, Any]],
+    device: torch.device,
+    config: MapFreeInferenceConfig,
+) -> list[dict[str, torch.Tensor]]:
+    amp_enabled = config.use_amp and device.type != "cpu"
+    amp_dtype = get_amp_dtype(device, config.amp_dtype) if amp_enabled else torch.float32
+    autocast_device_type = get_autocast_device_type(device)
+    device_views = move_views_to_device(views, device)
+
+    with torch.inference_mode():
+        with torch.autocast(
+            autocast_device_type,
+            enabled=amp_enabled,
+            dtype=amp_dtype,
+        ):
+            raw_outputs = model(device_views)
+
+    return postprocess_model_outputs_for_inference(
+        raw_outputs=raw_outputs,
+        input_views=device_views,
+        apply_mask=False,
+        mask_edges=False,
+    )
+
+
 MODEL_SPECS: dict[str, ModelSpec] = {
     "mapanything": ModelSpec(
         name="mapanything",
@@ -138,6 +182,14 @@ MODEL_SPECS: dict[str, ModelSpec] = {
         patch_size=14,
         loader=load_mapanything_model,
         adapter=mapanything_adapter,
+    ),
+    "pi3x": ModelSpec(
+        name="pi3x",
+        resolution=518,
+        norm_type="identity",
+        patch_size=14,
+        loader=lambda config, device: load_hydra_model("pi3x", config, device),
+        adapter=wrapper_adapter,
     ),
 }
 
@@ -563,6 +615,16 @@ def preprocess_batch_views(
         raw_views,
         **preprocess_kwargs,
     )
+
+
+def move_views_to_device(
+    views: list[dict[str, Any]],
+    device: torch.device,
+) -> list[dict[str, Any]]:
+    return [
+        to_device(view, device, non_blocking=device.type == "cuda")
+        for view in views
+    ]
 
 
 def run_model_inference(

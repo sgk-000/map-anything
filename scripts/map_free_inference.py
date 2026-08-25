@@ -1,4 +1,5 @@
-# Usage: uv run scripts/map_free_inference.py --model mapanything --dataset-root ~/dataset/map_free --scenes s00000
+# Usage (Pi3X):
+# uv run --extra pi3 python scripts/map_free_inference.py --model pi3x --dataset-root ~/dataset/map_free --scenes s00000
 
 from __future__ import annotations
 
@@ -13,18 +14,23 @@ from mapanything.utils.map_free_inference import (
     DEFAULT_WINDOW_SIZE,
     MapFreeInferenceConfig,
     run_map_free_inference,
+    SUPPORTED_MODELS,
     SUPPORTED_SPLITS,
 )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run MapAnything inference on the Map-Free dataset."
+        description="Run unified inference on the Map-Free dataset."
     )
     parser.add_argument(
         "--model",
         default="mapanything",
-        help="Model to run through the Map-Free inference interface.",
+        choices=SUPPORTED_MODELS,
+        help=(
+            "Model to run through the Map-Free inference interface. "
+            "Pi3X requires the 'pi3' extra; invoke uv with '--extra pi3'."
+        ),
     )
     parser.add_argument(
         "--dataset-root",
@@ -75,6 +81,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--device",
         default="auto",
         help="Torch device string to use (for example: auto, cuda, cuda:0, cpu).",
+    )
+    parser.add_argument(
+        "--machine",
+        default="default",
+        help="Hydra machine config name used for non-MapAnything models.",
     )
     parser.add_argument(
         "--mapanything-model-id",
@@ -139,6 +150,7 @@ def main(argv: list[str] | None = None) -> None:
         window_size=effective_window_size,
         long_side_resolution=args.long_side_resolution,
         device=args.device,
+        machine=args.machine,
         mapanything_model_id=args.mapanything_model_id,
         output_root=args.output_root,
         overwrite=args.overwrite,
