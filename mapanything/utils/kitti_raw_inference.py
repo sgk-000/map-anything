@@ -12,9 +12,13 @@ import torch
 from PIL import Image
 from tqdm import tqdm
 
-from mapanything.models import MapAnything, init_model_from_config
-from mapanything.utils.device import get_amp_dtype, get_autocast_device_type, get_device
-from mapanything.utils.device import to_device
+from mapanything.models import init_model_from_config, MapAnything
+from mapanything.utils.device import (
+    get_amp_dtype,
+    get_autocast_device_type,
+    get_device,
+    to_device,
+)
 from mapanything.utils.image import preprocess_inputs
 from mapanything.utils.inference import postprocess_model_outputs_for_inference
 
@@ -349,7 +353,18 @@ def expected_output_paths_for_job(
     window_size: int,
 ) -> list[Path]:
     batch_ranges = build_batch_ranges(num_images, window_size)
-    return [save_dir / f"{batch_idx}.npz" for batch_idx in range(len(batch_ranges))]
+    batch_filenames = build_batch_output_filenames(batch_ranges, window_size)
+    return [save_dir / filename for filename in batch_filenames]
+
+
+def build_batch_output_filenames(
+    batch_ranges: list[tuple[int, int]],
+    window_size: int,
+) -> list[str]:
+    if window_size <= 0:
+        raise ValueError(f"window_size must be positive, but got {window_size}")
+
+    return [f"{batch_idx}.npz" for batch_idx, _ in enumerate(batch_ranges)]
 
 
 def should_resume_skip_job(
@@ -452,40 +467,11 @@ def _to_numpy(tensor: torch.Tensor) -> np.ndarray:
 def normalize_predictions_for_saving(
     predictions: list[dict[str, torch.Tensor]],
 ) -> dict[str, np.ndarray]:
-    required_keys = ("depth_z", "depth_along_ray", "conf", "intrinsics", "camera_poses")
-    normalized: dict[str, list[np.ndarray]] = {key: [] for key in required_keys}
-    valid_masks: list[np.ndarray] = []
+    normalized_camera_poses: list[np.ndarray] = []
 
     for prediction in predictions:
-        missing = [key for key in required_keys if key not in prediction]
-        if missing:
-            raise KeyError(f"Prediction is missing required keys: {missing}")
-
-        depth_z = _squeeze_view_batch(prediction["depth_z"], "depth_z")
-        if depth_z.ndim == 2:
-            depth_z = depth_z.unsqueeze(-1)
-        if depth_z.ndim != 3 or depth_z.shape[-1] != 1:
-            raise ValueError(f"Expected 'depth_z' shape (H, W, 1), got {tuple(depth_z.shape)}.")
-
-        depth_along_ray = _squeeze_view_batch(prediction["depth_along_ray"], "depth_along_ray")
-        if depth_along_ray.ndim == 2:
-            depth_along_ray = depth_along_ray.unsqueeze(-1)
-        if depth_along_ray.ndim != 3 or depth_along_ray.shape[-1] != 1:
-            raise ValueError(
-                f"Expected 'depth_along_ray' shape (H, W, 1), got {tuple(depth_along_ray.shape)}."
-            )
-
-        conf = _squeeze_view_batch(prediction["conf"], "conf")
-        if conf.ndim == 3 and conf.shape[-1] == 1:
-            conf = conf[..., 0]
-        if conf.ndim != 2:
-            raise ValueError(f"Expected 'conf' shape (H, W), got {tuple(conf.shape)}.")
-
-        intrinsics = _squeeze_view_batch(
-            prediction["intrinsics"], "intrinsics", expected_ndim_after_squeeze=2
-        )
-        if tuple(intrinsics.shape) != (3, 3):
-            raise ValueError(f"Expected 'intrinsics' shape (3, 3), got {tuple(intrinsics.shape)}.")
+        if "camera_poses" not in prediction:
+            raise KeyError("Prediction is missing required key: 'camera_poses'")
 
         camera_poses = _squeeze_view_batch(
             prediction["camera_poses"], "camera_poses", expected_ndim_after_squeeze=2
@@ -495,20 +481,10 @@ def normalize_predictions_for_saving(
                 f"Expected 'camera_poses' shape (4, 4), got {tuple(camera_poses.shape)}."
             )
 
-        normalized["depth_z"].append(_to_numpy(depth_z))
-        normalized["depth_along_ray"].append(_to_numpy(depth_along_ray))
-        normalized["conf"].append(_to_numpy(conf))
-        normalized["intrinsics"].append(_to_numpy(intrinsics))
-        normalized["camera_poses"].append(_to_numpy(camera_poses))
-        valid_masks.append(_to_numpy(depth_z[..., 0] > 0))
+        normalized_camera_poses.append(_to_numpy(camera_poses))
 
     return {
-        "depth_z": np.stack(normalized["depth_z"], axis=0),
-        "depth_along_ray": np.stack(normalized["depth_along_ray"], axis=0),
-        "conf": np.stack(normalized["conf"], axis=0),
-        "intrinsics": np.stack(normalized["intrinsics"], axis=0),
-        "camera_poses": np.stack(normalized["camera_poses"], axis=0),
-        "valid_mask": np.stack(valid_masks, axis=0),
+        "camera_poses": np.stack(normalized_camera_poses, axis=0),
     }
 
 
@@ -532,8 +508,8 @@ def save_batch_output(
         frame_ids=np.asarray(frame_ids),
         window_start=np.int64(window_start),
         window_end=np.int64(window_end),
-        **predictions,
-        # poses=predictions["camera_poses"],
+        # KITTI Raw inference intentionally saves only model-predicted poses.
+        poses=predictions["camera_poses"],
     )
 
 
@@ -618,14 +594,15 @@ def run_drive_camera_job(
     )
 
     batch_ranges = build_batch_ranges(len(image_paths), config.window_size)
+    batch_filenames = build_batch_output_filenames(batch_ranges, config.window_size)
     batch_iterator = tqdm(
-        enumerate(batch_ranges),
+        zip(batch_filenames, batch_ranges, strict=True),
         total=len(batch_ranges),
         desc=f"{drive_dir.name}/{camera}",
         leave=False,
     )
-    for batch_idx, (start, end) in batch_iterator:
-        save_path = save_dir / f"{batch_idx}.npz"
+    for batch_filename, (start, end) in batch_iterator:
+        save_path = save_dir / batch_filename
         if save_path.exists() and not config.overwrite:
             continue
 
@@ -640,6 +617,9 @@ def run_drive_camera_job(
             config=config,
         )
         normalized_predictions = normalize_predictions_for_saving(predictions)
+        # Save the full pose sequence for this inference context. A shifted
+        # final window may repeat frame_ids from the previous .npz file; those
+        # are independent window-scoped predictions, so we do not merge them.
         save_batch_output(
             save_path=save_path,
             model_name=config.model,

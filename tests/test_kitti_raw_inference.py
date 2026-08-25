@@ -176,11 +176,45 @@ class KittiRawInferenceTests(unittest.TestCase):
             np.array([[710.0, 0.0, 610.0], [0.0, 710.0, 190.0], [0.0, 0.0, 1.0]], dtype=np.float32),
         )
 
-    def test_build_batch_ranges_handles_short_and_overlapping_final_windows(self) -> None:
+    def test_build_batch_ranges_handles_short_and_shifted_final_windows(self) -> None:
         self.assertEqual(kr.build_batch_ranges(num_images=3, window_size=5), [(0, 3)])
         self.assertEqual(
             kr.build_batch_ranges(num_images=250, window_size=100),
             [(0, 100), (100, 200), (150, 250)],
+        )
+        self.assertEqual(
+            kr.build_batch_ranges(num_images=200, window_size=100),
+            [(0, 100), (100, 200)],
+        )
+        self.assertEqual(
+            kr.build_batch_ranges(num_images=225, window_size=100),
+            [(0, 100), (100, 200), (125, 225)],
+        )
+        self.assertEqual(
+            kr.build_batch_ranges(num_images=3, window_size=1),
+            [(0, 1), (1, 2), (2, 3)],
+        )
+        self.assertEqual(
+            kr.build_batch_ranges(num_images=418, window_size=50)[-1],
+            (368, 418),
+        )
+
+    def test_build_batch_output_filenames_uses_sequential_indices(self) -> None:
+        batch_ranges = kr.build_batch_ranges(num_images=250, window_size=100)
+        self.assertEqual(
+            kr.build_batch_output_filenames(batch_ranges, window_size=100),
+            ["0.npz", "1.npz", "2.npz"],
+        )
+
+        short_tail_ranges = kr.build_batch_ranges(num_images=80, window_size=50)
+        self.assertEqual(short_tail_ranges, [(0, 50), (30, 80)])
+        self.assertEqual(
+            kr.build_batch_output_filenames(short_tail_ranges, window_size=50),
+            ["0.npz", "1.npz"],
+        )
+        self.assertEqual(
+            kr.expected_output_paths_for_job(self.tmp_path, num_images=3, window_size=2),
+            [self.tmp_path / "0.npz", self.tmp_path / "1.npz"],
         )
 
     def test_output_dir_for_drive_includes_model_and_camera(self) -> None:
@@ -308,17 +342,10 @@ class KittiRawInferenceTests(unittest.TestCase):
         )
         wrapper_serialized = kr.normalize_predictions_for_saving(wrapper_predictions)
 
-        expected_keys = {
-            "depth_z",
-            "depth_along_ray",
-            "conf",
-            "intrinsics",
-            "camera_poses",
-            "valid_mask",
-        }
+        expected_keys = {"camera_poses"}
         self.assertEqual(set(map_serialized), expected_keys)
         self.assertEqual(set(wrapper_serialized), expected_keys)
-        self.assertEqual(map_serialized["depth_z"].shape[0], 2)
+        self.assertEqual(map_serialized["camera_poses"].shape, (2, 4, 4))
         self.assertEqual(wrapper_serialized["camera_poses"].shape, (2, 4, 4))
         self.assertIs(map_model.infer_calls[0]["apply_mask"], False)
         self.assertIs(map_model.infer_calls[0]["mask_edges"], False)
@@ -339,8 +366,7 @@ class KittiRawInferenceTests(unittest.TestCase):
         loaded = np.load(save_path)
         self.assertEqual(
             set(loaded.files),
-            expected_keys
-            | {
+            {
                 "model",
                 "date",
                 "drive",
@@ -348,8 +374,10 @@ class KittiRawInferenceTests(unittest.TestCase):
                 "frame_ids",
                 "window_start",
                 "window_end",
+                "poses",
             },
         )
+        self.assertEqual(loaded["poses"].shape, (2, 4, 4))
 
     def test_cli_smoke_writes_outputs_and_manifest(self) -> None:
         stub_model = StubMapAnythingModel()
@@ -405,7 +433,20 @@ class KittiRawInferenceTests(unittest.TestCase):
         self.assertEqual(second_batch["frame_ids"].tolist(), ["0000000001", "0000000002"])
         self.assertEqual(first_batch["drive"].item(), "2011_09_28_drive_0034_sync")
         self.assertEqual(first_batch["date"].item(), "2011_09_28")
-        self.assertEqual(first_batch["depth_z"].shape[0], 2)
+        expected_saved_keys = {
+            "model",
+            "date",
+            "drive",
+            "camera",
+            "frame_ids",
+            "window_start",
+            "window_end",
+            "poses",
+        }
+        self.assertEqual(set(first_batch.files), expected_saved_keys)
+        self.assertEqual(set(second_batch.files), expected_saved_keys)
+        self.assertEqual(first_batch["poses"].shape, (2, 4, 4))
+        self.assertEqual(second_batch["poses"].shape, (2, 4, 4))
 
 
 if __name__ == "__main__":
